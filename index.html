@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Happy Birthday Mariam</title>
+<style>
+  :root { --pink:#ff5c8a; --gold:#ffd25e; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; overflow:hidden; color:#fff;
+    font-family: system-ui, "Segoe UI", Tahoma, sans-serif;
+    background: radial-gradient(ellipse at 50% 35%, #3a1238 0, #170b22 50%, #07050c 100%); }
+  body { display:flex; align-items:center; justify-content:center; }
+  #stage { position:relative; line-height:0; border-radius:16px;
+    box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 20px 80px rgba(255,80,140,.28), 0 0 140px rgba(255,200,90,.10); }
+  canvas { display:block; border-radius:16px; background:#08060e; }
+  #intro { position:fixed; inset:0; z-index:5; overflow:hidden; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:18px; text-align:center; padding:24px;
+    background: radial-gradient(ellipse at 50% 40%, rgba(70,20,70,.82), rgba(7,5,12,.95));
+    backdrop-filter: blur(8px); transition: opacity .8s, visibility .8s; }
+  #intro.hide { opacity:0; visibility:hidden; }
+  #intro h1 { margin:0; line-height:1.1; font-size:clamp(34px,8vw,72px); letter-spacing:.04em;
+    background: linear-gradient(90deg, var(--gold), var(--pink), var(--gold)); background-size:200% 100%;
+    -webkit-background-clip:text; background-clip:text; color:transparent; animation: shine 4s linear infinite; }
+  #intro p { margin:0; opacity:.7; font-size:clamp(14px,2.4vw,18px); }
+  #rot { display:none; }
+  @media (orientation:portrait) { #rot { display:block !important; } }
+  #go { padding:14px 38px; border:0; border-radius:999px; cursor:pointer; font-weight:700; font-size:19px;
+    font-family:inherit; color:#3a0a24; background: linear-gradient(135deg, var(--gold), var(--pink));
+    box-shadow: 0 0 34px rgba(255,92,138,.55); animation: pulse 1.8s ease-in-out infinite; }
+  .fh { position:absolute; bottom:-50px; left:var(--x); font-size:28px; color:var(--pink); opacity:.7;
+    animation: up 7s linear infinite var(--d); }
+  @keyframes shine { to { background-position:200% 0; } }
+  @keyframes pulse { 50% { transform:scale(1.07); box-shadow:0 0 52px rgba(255,92,138,.8); } }
+  @keyframes up { to { transform:translateY(-115vh) rotate(25deg); opacity:0; } }
+  #bar { position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:4; display:flex;
+    align-items:center; gap:10px; padding:8px 14px; border-radius:999px; background:rgba(30,16,40,.55);
+    backdrop-filter:blur(14px); border:1px solid rgba(255,255,255,.12); box-shadow:0 8px 30px rgba(0,0,0,.45);
+    transition: opacity .4s, transform .4s; }
+  #bar.idle { opacity:0; transform:translate(-50%,16px); pointer-events:none; }
+  #bar button { width:38px; height:38px; border-radius:50%; border:0; background:rgba(255,255,255,.1);
+    color:#fff; font-size:17px; cursor:pointer; transition:.2s; }
+  #bar button:hover { background:rgba(255,92,138,.55); transform:scale(1.08); }
+  #prog { position:relative; width:min(34vw,300px); height:6px; border-radius:6px; background:rgba(255,255,255,.14); overflow:hidden; }
+  #fill { position:absolute; inset:0 auto 0 0; width:0; border-radius:6px; background:linear-gradient(90deg, var(--gold), var(--pink)); }
+  #cap { font-size:12px; opacity:.85; min-width:100px; white-space:nowrap; }
+  @media (max-width:520px) { #cap { display:none; } #prog { width:22vw; } }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="cv"></canvas></div>
+<div id="intro">
+  <span class="fh" style="--x:8%;--d:0s">♥</span><span class="fh" style="--x:24%;--d:2s">♥</span>
+  <span class="fh" style="--x:42%;--d:4s">♥</span><span class="fh" style="--x:60%;--d:1s">♥</span>
+  <span class="fh" style="--x:78%;--d:3s">♥</span><span class="fh" style="--x:92%;--d:5s">♥</span>
+  <h1>Happy Birthday<br>Mariam</h1>
+  <button id="go">ابدأ ▶</button>
+  <p id="rot">📱 لف الموبايل أفقي عشان تشوفها أحلى</p>
+</div>
+<div id="bar" class="idle">
+  <button id="bPlay" title="Pause / Play">⏸</button><button id="bRe" title="Replay">↻</button>
+  <div id="prog"><div id="fill"></div></div><span id="cap"></span>
+  <button id="bMute" title="Sound">🔊</button><button id="bFs" title="Fullscreen">⛶</button>
+</div>
+<script>
+"use strict";
+// ASCII animation: HAPPY BIRTHDAY MARIAM — everything is made of text characters.
+const COLS = 110, ROWS = 42, FPS = 30;
+const LINES = [[3, "HAPPY"], [9, "BIRTHDAY"], [15, "MARIAM"]];
+const CYCLE = "HAPPYBIRTHDAYMARIAM";
+
+const T_ENV_IN = [0.8, 3.0];   // envelope slides in
+const T_FLAP = [3.4, 5.0];     // flap opens
+const T_TEXT0 = 5.0;           // first letter leaves the envelope
+const PIX_DELAY = 0.02;        // slowness of letter forming
+const FLIGHT = 1.8;
+const T_FLY0 = 21.0, T_FLY1 = 30.0;   // envelope flies away
+const T_BURN0 = T_FLY0 + 1.0;         // fire starts
+const T_FIRE0 = T_FLY1 - 1.5, T_GRAND = 38.0;   // fireworks start / grand finale
+const T_END = 52.0;                   // loop
+
+const ENV_W = 38, ENV_H = 12;
+const ENV_X = Math.floor((COLS - ENV_W) / 2), ENV_Y = 27;
+
+// ---------- helpers
+const clamp = (x, a = 0, b = 1) => x < a ? a : x > b ? b : x;
+const easeOut = u => 1 - Math.pow(1 - u, 3);
+const easeInOut = u => u * u * (3 - 2 * u);
+const lerp = (a, b, k) => { k = clamp(k); return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k]; };
+const scale = (c, k) => [Math.min(255, c[0] * k), Math.min(255, c[1] * k), Math.min(255, c[2] * k)];
+const rnd = (a, b) => a + Math.random() * (b - a);
+const choice = s => s[Math.floor(Math.random() * s.length)];
+const round = Math.round;
+
+class Buf {
+  constructor() {
+    this.ch = Array.from({ length: ROWS }, () => new Array(COLS).fill(" "));
+    this.co = Array.from({ length: ROWS }, () => new Array(COLS).fill(null));
+  }
+  put(r, c, ch, col) {
+    if (r >= 0 && r < ROWS && c >= 0 && c < COLS) { this.ch[r][c] = ch; this.co[r][c] = col; }
+  }
+}
+
+// ---------- big letters (5x5)
+const FONT5 = {
+  A: [" ### ", "#   #", "#####", "#   #", "#   #"],
+  B: ["#### ", "#   #", "#### ", "#   #", "#### "],
+  D: ["#### ", "#   #", "#   #", "#   #", "#### "],
+  H: ["#   #", "#   #", "#####", "#   #", "#   #"],
+  I: ["#####", "  #  ", "  #  ", "  #  ", "#####"],
+  M: ["#   #", "## ##", "# # #", "#   #", "#   #"],
+  P: ["#### ", "#   #", "#### ", "#    ", "#    "],
+  R: ["#### ", "#   #", "#### ", "#  # ", "#   #"],
+  T: ["#####", "  #  ", "  #  ", "  #  ", "  #  "],
+  Y: ["#   #", " # # ", "  #  ", "  #  ", "  #  "],
+};
+
+function layout(text, top) {
+  const widths = [...text].map(ch => ch === " " ? 6 : 10);
+  const total = widths.reduce((a, b) => a + b, 0) + 2 * (text.length - 1);
+  let c = Math.floor((COLS - total) / 2);
+  const pts = [];
+  [...text].forEach((ch, i) => {
+    if (ch !== " ") {
+      FONT5[ch].forEach((row, r) => {
+        [...row].forEach((v, k) => {
+          if (v === "#") { pts.push([top + r, c + 2 * k]); pts.push([top + r, c + 2 * k + 1]); }
+        });
+      });
+    }
+    c += widths[i] + 2;
+  });
+  return pts.sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+}
+
+function buildPixels() {
+  const pix = []; let i = 0;
+  for (const [top, text] of LINES) {
+    for (const [r, c] of layout(text, top)) {
+      pix.push({ r, c, t0: T_TEXT0 + i * PIX_DELAY, ch: CYCLE[i % CYCLE.length],
+        sx: ENV_X + ENV_W / 2 + rnd(-5, 5), sy: ENV_Y + rnd(-1, 2), ph: rnd(0, 6.28) });
+      i++;
+    }
+  }
+  return pix;
+}
+
+// ---------- flowers
+const PINK = [[255, 90, 140], [255, 140, 180], [255, 205, 225]];
+const LILAC = [[170, 120, 255], [200, 160, 255], [235, 215, 255]];
+const GOLD = [[255, 150, 60], [255, 195, 90], [255, 235, 170]];
+const RED = [[230, 40, 70], [255, 90, 110], [255, 170, 180]];
+const PINK2 = [[255, 110, 190], [255, 160, 215], [255, 215, 238]];
+const FLOWERS = [
+  { cx: 55, cy: 21, R: 38, start: 0.4, dur: 10, rot: 0.0, spin: 0.10, pal: PINK },
+  { cx: 13, cy: 34, R: 15, start: 2.0, dur: 6, rot: 0.5, spin: -0.15, pal: LILAC },
+  { cx: 97, cy: 9, R: 15, start: 3.5, dur: 6, rot: 1.0, spin: 0.15, pal: GOLD },
+  { cx: 97, cy: 35, R: 13, start: 5.0, dur: 6, rot: 0.2, spin: -0.12, pal: RED },
+  { cx: 12, cy: 8, R: 13, start: 6.5, dur: 6, rot: 0.8, spin: 0.12, pal: PINK2 },
+];
+const PETAL = "@#%*+:.";
+const DIM = 0.55;
+const RAMP = ".,:;-=+*oO#%@";
+
+function drawFlower(buf, f, t) {
+  const prog = clamp((t - f.start) / f.dur);
+  if (prog <= 0) return;
+  const { cx, cy, R } = f;
+  const layers = [[0.42, 0.7, 2, 0.4], [0.72, 0.35, 1, 0.2], [1.0, 0.0, 0, 0.0]];
+  const lay = [];
+  for (const [sc, ro, pi, sf] of layers) {
+    const p = easeOut(clamp((prog - sf) / 0.6));
+    if (p > 0.02) lay.push([sc * R * p * (1 + 0.03 * Math.sin(t * 1.8 + ro)), f.rot + ro + f.spin * t, f.pal[pi]]);
+  }
+  if (!lay.length) return;
+  const r0 = Math.max(0, Math.floor(cy - R / 2 - 1)), r1 = Math.min(ROWS, Math.floor(cy + R / 2 + 2));
+  const c0 = Math.max(0, cx - R - 1), c1 = Math.min(COLS, cx + R + 2);
+  for (let r = r0; r < r1; r++) {
+    const dy = (r - cy) * 2;
+    for (let c = c0; c < c1; c++) {
+      const dx = c - cx;
+      const rad = Math.hypot(dx, dy), th = Math.atan2(dy, dx);
+      for (const [size, rot, col] of lay) {
+        const edge = size * (0.4 + 0.6 * Math.abs(Math.cos(3 * (th + rot))));
+        if (rad <= edge) {
+          const ratio = rad / edge;
+          const rib = Math.pow(Math.abs(Math.cos(3 * (th + rot))), 6);             // petal mid-rib highlight
+          const sw = 0.5 + 0.5 * Math.sin(rad * 0.55 - t * 1.2 + th * 3);          // soft shimmer
+          const lum = clamp(0.25 + 0.4 * (1 - ratio) + 0.28 * rib + 0.16 * sw + (ratio > 0.86 ? 0.2 : 0));
+          buf.put(r, c, RAMP[Math.min(RAMP.length - 1, Math.floor(lum * RAMP.length))], scale(col, DIM * (0.55 + lum * 0.9)));
+          break;
+        }
+      }
+    }
+  }
+  if (lay[0][0] > 1.5) buf.put(cy, cx, "*", scale([255, 220, 80], 0.9));
+}
+
+// ---------- hearts
+const HEART_BIG = [" .-.-. ", "(     )", " \\   / ", "  \\ /  ", "   V   "];
+const HEART_COLS = [[255, 70, 110], [255, 120, 160], [255, 160, 190], [230, 50, 90]];
+
+// ---------- envelope
+function envCells(p) {
+  const W = ENV_W, H = ENV_H, cells = new Map();
+  const set = (r, c, ch, col) => cells.set(r + "," + c, [r, c, ch, col]);
+  const paper = [245, 232, 196], edge = [255, 243, 214], lining = [190, 90, 120], red = [255, 60, 80];
+  for (let r = 1; r < H - 1; r++) for (let c = 1; c < W - 1; c++) { const g = (r * 31 + c * 17) % 11 === 0; set(r, c, g ? "." : " ", g ? [205, 188, 150] : paper); }
+  for (let c = 1; c < W - 1; c++) { set(0, c, "-", edge); set(H - 1, c, "-", edge); }
+  for (let r = 1; r < H - 1; r++) { set(r, 0, "|", edge); set(r, W - 1, "|", edge); }
+  for (const [r, c] of [[0, 0], [0, W - 1], [H - 1, 0], [H - 1, W - 1]]) set(r, c, "+", edge);
+  for (let c = 2; c <= W; c++) set(H, c, ":", [70, 40, 75]);               // drop shadow
+  for (let r = 2; r <= H; r++) set(r, W, ":", [70, 40, 75]);
+  const half = W >> 1;
+  for (let c = 1; c < half; c++) {                       // bottom folds
+    const lr = (H - 2) - round(c / half * (H / 2 - 1));
+    set(lr, c, "/", edge); set(lr, W - 1 - c, "\\", edge);
+  }
+  const apex = round((H / 2 + 1) * (1 - 2 * p));         // +7 closed ... -7 open
+  for (let c = 1; c <= half; c++) {
+    const lr = round(apex * c / half);
+    const [chl, chr] = apex >= 0 ? ["\\", "/"] : ["/", "\\"];
+    if (apex < 0) for (let rr = lr + 1; rr < 0; rr++) { set(rr, c, ".", lining); set(rr, W - 1 - c, ".", lining); }
+    set(lr, c, chl, edge); set(lr, W - 1 - c, chr, edge);
+  }
+  if (p < 0.4) { set(apex, half - 2, "(", [255, 200, 90]); set(apex, half - 1, "<", red); set(apex, half, "3", red); set(apex, half + 1, ")", [255, 200, 90]); }
+  [..."~ For Mariam ~"].forEach((ch, i) => { if (ch !== " ") set(H - 4, half - 7 + i, ch, [255, 130, 160]); });   // heart seal
+  return cells;
+}
+
+function flapValue(t) {
+  if (t < T_FLAP[0]) return 0;
+  if (t < T_FLAP[1]) return easeInOut((t - T_FLAP[0]) / (T_FLAP[1] - T_FLAP[0]));
+  if (t < T_FLY0) return 1;
+  return 0.55 + 0.45 * Math.sin(t * 9);                  // flaps like wings
+}
+
+function envPosition(t) {
+  if (t < T_ENV_IN[0] || t >= T_FLY1) return null;
+  if (t < T_ENV_IN[1]) {
+    const u = easeOut((t - T_ENV_IN[0]) / (T_ENV_IN[1] - T_ENV_IN[0]));
+    return [ENV_X, ENV_Y + (ROWS - ENV_Y + 1) * (1 - u)];
+  }
+  if (t < T_FLY0) return [ENV_X, ENV_Y + 0.7 * Math.sin(t * 1.7)];
+  const u = (t - T_FLY0) / (T_FLY1 - T_FLY0);
+  return [ENV_X + 55 * u + 4 * Math.sin(u * 10), ENV_Y - 46 * Math.pow(u, 1.2) + 2 * Math.sin(u * 17)];
+}
+
+function burnTime(lr, lc) {
+  const dist = Math.hypot(lc * 0.5, lr - (ENV_H - 1));
+  const h = (((lr * 73856093) ^ (lc * 19349663)) % 100 + 100) % 100;
+  return T_BURN0 + dist * 0.17 + h / 100 * 0.6;
+}
+const FIRE = [[255, 245, 160], [255, 200, 50], [255, 120, 20], [220, 50, 15]];
+
+// ---------- scene
+class Scene {
+  constructor() { this.reset(); }
+  reset() {
+    this.pix = buildPixels();
+    this.hearts = []; this.parts = []; this.nextHeart = 0.3; this.rockets = []; this.sparks = []; this.nextFw = T_FIRE0; this.grand = false;
+    this.stars = Array.from({ length: 90 }, () => [Math.floor(Math.random() * ROWS), Math.floor(Math.random() * COLS), rnd(0, 6.28)]);
+  }
+
+  heartsLayer(buf, t, dt) {
+    if (t >= this.nextHeart) {
+      this.hearts.push({ x: rnd(2, COLS - 8), y: ROWS + 1, vy: rnd(2.5, 5), big: Math.random() < 0.45,
+        col: HEART_COLS[Math.floor(Math.random() * HEART_COLS.length)], ph: rnd(0, 6.28), amp: rnd(1, 3) });
+      this.nextHeart = t + (t < T_FLY1 ? 0.45 : 0.2) * rnd(0.6, 1.4);
+    }
+    const alive = [];
+    for (const h of this.hearts) {
+      h.y -= h.vy * dt;
+      if (h.y < -5) continue;
+      alive.push(h);
+      const x = Math.floor(h.x + Math.sin(t * 1.5 + h.ph) * h.amp), y = Math.floor(h.y);
+      const col = scale(h.col, 0.85);
+      if (h.big) HEART_BIG.forEach((row, dr) => [...row].forEach((ch, dc) => { if (ch !== " ") buf.put(y + dr, x + dc, ch, col); }));
+      else { buf.put(y, x, "<", col); buf.put(y, x + 1, "3", col); }
+    }
+    this.hearts = alive;
+  }
+
+  envelopeLayer(buf, t) {
+    const pos = envPosition(t);
+    if (!pos) return;
+    const ox = round(pos[0]), oy = round(pos[1]);
+    const cells = envCells(flapValue(t));
+    const burning = t >= T_BURN0;
+    for (const [lr, lc, ch, col] of cells.values()) {
+      const r = oy + lr, c = ox + lc;
+      if (!burning) { buf.put(r, c, ch, col); continue; }
+      const age = t - burnTime(lr, lc);
+      if (age < -0.5) buf.put(r, c, ch, col);
+      else if (age < 0) buf.put(r, c, ch, lerp(col, [110, 50, 20], 1 + age / 0.5));
+      else if (age < 0.9) {
+        if (ch === " " && Math.random() < 0.5) buf.put(r, c, " ", col);
+        else {
+          const idx = Math.min(3, Math.floor(age / 0.9 * 4 + Math.random() * 0.8));
+          buf.put(r, c, choice("^*'\"`~;()"), FIRE[idx]);
+        }
+        if (Math.random() < 0.012 && this.parts.length < 500)
+          this.parts.push([c, r, rnd(-1.5, 1.5), -rnd(2, 7), rnd(0.6, 1.8), 1.8, choice("*.'`"), "ember"]);
+      } else if (age < 1.8) {
+        if (ch !== " ") {
+          buf.put(r, c, age < 1.3 ? "." : ",", scale([150, 140, 130], (1.8 - age) / 0.9));
+          if (Math.random() < 0.01 && this.parts.length < 500)
+            this.parts.push([c, r, rnd(-0.5, 0.5), rnd(1, 3), 1.5, 1.5, ".", "ash"]);
+        }
+      }
+    }
+  }
+
+  textLayer(buf, t) {
+    const settled = [];
+    for (const p of this.pix) {
+      const u = (t - p.t0) / FLIGHT;
+      if (u < 0) continue;
+      if (u < 1) {
+        const e = easeOut(u);
+        const x = p.sx + (p.c - p.sx) * e + Math.sin(u * 6.28 + p.ph) * 3 * (1 - e);
+        const y = p.sy + (p.r - p.sy) * e - Math.sin(u * 3.14) * 3;
+        buf.put(round(y), round(x), choice(CYCLE + "<3*+"), lerp([255, 255, 255], [255, 170, 200], u));
+      } else settled.push(p);
+    }
+    for (const p of settled)                                // dark halo = readable text
+      for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) buf.put(p.r + dr, p.c + dc, " ", [0, 0, 0]);
+    for (const p of settled) buf.put(p.r + 1, p.c + 1, ":", [120, 40, 110]);   // soft letter shadow
+    for (const p of settled) {
+      const k = 0.5 + 0.5 * Math.sin(p.c * 0.12 - t * 2.2 + p.r * 0.3);
+      let col = lerp([255, 215, 90], [255, 140, 190], k);
+      const age = t - (p.t0 + FLIGHT);
+      if (age < 0.4) col = lerp([255, 255, 255], col, age / 0.4);
+      buf.put(p.r, p.c, p.ch, col);
+    }
+  }
+
+  particlesLayer(buf, dt) {
+    const alive = [];
+    for (const q of this.parts) {
+      q[0] += q[2] * dt; q[1] += q[3] * dt; q[4] -= dt;
+      if (q[4] <= 0) continue;
+      alive.push(q);
+      const k = q[4] / q[5];
+      const col = q[7] === "ember" ? lerp([120, 20, 10], [255, 170, 40], k) : scale([150, 140, 130], k);
+      buf.put(round(q[1]), round(q[0]), q[6], col);
+    }
+    this.parts = alive;
+  }
+
+  launch(x, ty, kind, big, wait = 0) {
+    const cols = kind === "heart" ? [[255, 60, 110], [255, 170, 200]] : kind === "willow" ? [[255, 200, 80], [255, 150, 40]] : choice(FW_COLS);
+    this.rockets.push({ x, y: ROWS, ty, vy: rnd(24, 30), kind, big, cols, wait, fired: false });
+  }
+
+  explode(r) {
+    const P = this.sparks, [c1, c2] = r.cols;
+    const add = (vx, vy, life, g, k, ch) => P.push([r.x, r.y, vx, vy, life, life, ch, Math.random() < 0.5 ? c1 : c2, g, k]);
+    if (r.kind === "heart") {                                   // heart-shaped burst
+      const m = r.big ? 1.25 : 0.9;
+      for (let i = 0; i < 70; i++) {
+        const a = i / 70 * 6.283, hx = 16 * Math.pow(Math.sin(a), 3);
+        const hy = -(13 * Math.cos(a) - 5 * Math.cos(2 * a) - 2 * Math.cos(3 * a) - Math.cos(4 * a));
+        add(hx * 0.9 * m / 0.4, hy * 0.45 * m / 0.4, 2.4, 1.2, 2.5, "*");
+      }
+    } else {
+      const ring = r.kind === "ring", w = r.kind === "willow", n = ring ? 46 : 84, sp = rnd(9, 14);
+      for (let i = 0; i < n; i++) {
+        const a = ring ? i / n * 6.283 : Math.random() * 6.283, s = ring ? sp : sp * (0.55 + 0.45 * Math.random());
+        add(Math.cos(a) * s * 2, Math.sin(a) * s, w ? rnd(2.6, 3.4) : rnd(1.4, 2.2), w ? 8 : 5, w ? 0.9 : 1.3, w ? "'" : "*");
+      }
+    }
+    if (P.length > 1400) P.splice(0, P.length - 1400);
+    boom(r.x, r.big);
+  }
+
+  fireworksLayer(buf, t, dt) {
+    if (t >= this.nextFw) {
+      this.launch(rnd(14, COLS - 14), rnd(5, 17), choice(["sphere", "sphere", "ring", "willow", "heart"]), false);
+      this.nextFw = t + rnd(0.7, 1.5) * (t > T_GRAND ? 0.6 : 1);
+    }
+    if (!this.grand && t >= T_GRAND) {                          // grand finale: big heart + salvo
+      this.grand = true;
+      this.launch(COLS / 2, 10, "heart", true);
+      [18, 40, 72, 92].forEach((x, i) => this.launch(x, rnd(6, 14), choice(["sphere", "ring", "willow"]), false, 0.5 + i * 0.35));
+    }
+    const rk = [];
+    for (const r of this.rockets) {
+      if (r.wait > 0) { r.wait -= dt; rk.push(r); continue; }
+      if (!r.fired) { r.fired = true; whoosh(r.x); }
+      r.y -= r.vy * dt;
+      if (r.y <= r.ty) { this.explode(r); continue; }
+      rk.push(r);
+      const hx = round(r.x + Math.sin(r.y * 0.5) * 0.6), hy = round(r.y);
+      buf.put(hy, hx, "|", [255, 240, 200]);
+      [["!", [255, 190, 90]], [":", [200, 120, 50]], [".", [120, 70, 40]], [".", [70, 40, 30]]].forEach(([ch, col], i) => buf.put(hy + i + 1, hx, ch, col));
+    }
+    this.rockets = rk;
+    const sp = [];
+    for (const q of this.sparks) {
+      const d = Math.exp(-q[9] * dt);
+      q[2] *= d; q[3] = q[3] * d + q[8] * dt; q[0] += q[2] * dt; q[1] += q[3] * dt; q[4] -= dt;
+      if (q[4] <= 0) continue;
+      sp.push(q);
+      const f = q[4] / q[5];
+      if (f < 0.3 && Math.random() < 0.4) continue;             // twinkle out
+      const ch = q[6] === "'" ? (f > 0.4 ? "'" : ".") : f > 0.7 ? "*" : f > 0.4 ? "+" : f > 0.2 ? ":" : ".";
+      buf.put(round(q[1]), round(q[0]), ch, f > 0.93 ? [255, 255, 255] : lerp([70, 25, 20], q[7], f * 1.3));
+    }
+    this.sparks = sp;
+  }
+
+  frame(t, dt) {
+    const buf = new Buf();
+    for (const [r, c, ph] of this.stars) {
+      const v = 0.5 + 0.5 * Math.sin(t * 2 + ph);
+      if (v > 0.6) {
+        const sc = scale([200, 200, 255], v * 0.6);
+        buf.put(r, c, v > 0.9 ? "+" : ".", sc);
+        if (v > 0.96) { buf.put(r, c - 1, "-", sc); buf.put(r, c + 1, "-", sc); buf.put(r - 1, c, "|", sc); buf.put(r + 1, c, "|", sc); }
+      }
+    }
+    for (const f of FLOWERS) drawFlower(buf, f, t);
+    this.fireworksLayer(buf, t, dt);
+    this.heartsLayer(buf, t, dt);
+    this.envelopeLayer(buf, t);
+    this.textLayer(buf, t);
+    this.particlesLayer(buf, dt);
+    return buf;
+  }
+}
+
+// ---------- rendering
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+const FS = 16, FONT = `700 ${FS}px Consolas, "DejaVu Sans Mono", Menlo, "Courier New", monospace`;
+ctx.font = FONT;
+const CW = Math.ceil(ctx.measureText("M").width), CH = Math.ceil(FS * 1.2);
+const dpr = Math.min(window.devicePixelRatio || 1, 2);
+cv.width = COLS * CW * dpr; cv.height = ROWS * CH * dpr;
+cv.style.aspectRatio = `${COLS * CW} / ${ROWS * CH}`;
+cv.style.width = `min(calc(100vw - 24px), calc((100vh - 24px) * ${COLS * CW / (ROWS * CH)}))`;
+
+function draw(buf) {
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#08060e";
+  ctx.fillRect(0, 0, COLS * CW, ROWS * CH);
+  ctx.font = FONT; ctx.textBaseline = "top";
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const col = buf.co[r][c], ch = buf.ch[r][c];
+    if (!col || ch === " ") continue;
+    ctx.fillStyle = `rgb(${col[0] | 0},${col[1] | 0},${col[2] | 0})`;
+    ctx.fillText(ch, c * CW, r * CH + 1);
+  }
+}
+
+// ---------- UI + sound + main loop (fixed ~30 fps)
+const $ = id => document.getElementById(id);
+const scene = new Scene();
+let t = 0, acc = 0, last = performance.now(), prevT = 0, playing = false, muted = false;
+let ac = null, master = null, bus = null, cap = "", idleTimer;
+const STAGES = [[0, "🌸 الورد بيتفتح"], [T_ENV_IN[0], "💌 الظرف وصل"], [T_FLAP[0], "✨ بيتفتح..."],
+  [T_TEXT0, "🎂 الرسالة"], [T_FLY0, "🔥 الظرف بيطير"], [T_FIRE0, "🎆 ألعاب نارية"], [T_GRAND, "💖 Happy Birthday!"]];
+
+function audio() {
+  if (!ac) try {
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    master = ac.createGain(); master.gain.value = muted ? 0 : 1; master.connect(ac.destination);
+  } catch (e) { ac = null; }
+}
+function newBus() {                       // fresh channel per run; old sounds fade out on restart
+  if (!ac) return;
+  if (bus) bus.gain.setTargetAtTime(0, ac.currentTime, 0.03);
+  bus = ac.createGain(); bus.connect(master);
+}
+function note(n, at, dur) {
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = "triangle"; o.frequency.value = 261.63 * Math.pow(2, n / 12);
+  g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(0.16, at + 0.03);
+  g.gain.exponentialRampToValueAtTime(0.001, at + dur);
+  o.connect(g).connect(bus); o.start(at); o.stop(at + dur + 0.05);
+}
+function melody() {                       // "Happy Birthday" (public-domain tune), triangle wave
+  if (!ac || !bus) return;
+  const seq = [[7,.75],[7,.25],[9,1],[7,1],[12,1],[11,2],[7,.75],[7,.25],[9,1],[7,1],[14,1],[12,2],
+    [7,.75],[7,.25],[19,1],[16,1],[12,1],[11,1],[9,2],[17,.75],[17,.25],[16,1],[12,1],[14,1],[12,2]];
+  let at = ac.currentTime + 0.1;
+  for (const [n, b] of seq) { note(n, at, b * 0.475); at += b * 0.5; }
+}
+function crackle() {                      // fire hiss + pops
+  if (!ac || !bus) return;
+  const n = ac.sampleRate * 6, b = ac.createBuffer(1, n, ac.sampleRate), d = b.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = (Math.random() < 0.0015 ? Math.random() * 2 - 1 : 0) + (Math.random() * 2 - 1) * 0.05;
+  const s = ac.createBufferSource(), g = ac.createGain(), T = ac.currentTime;
+  s.buffer = b; g.gain.setValueAtTime(0, T); g.gain.linearRampToValueAtTime(0.5, T + 0.8); g.gain.linearRampToValueAtTime(0, T + 6);
+  s.connect(g).connect(bus); s.start();
+}
+
+const FW_COLS = [[[255, 80, 120], [255, 190, 210]], [[80, 200, 255], [200, 240, 255]], [[255, 210, 70], [255, 150, 40]],
+  [[170, 110, 255], [240, 200, 255]], [[90, 255, 150], [220, 255, 200]], [[255, 120, 60], [255, 220, 120]]];
+let noiseBuf = null;
+function noise() {
+  if (!noiseBuf) { noiseBuf = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
+  const s = ac.createBufferSource(); s.buffer = noiseBuf; return s;
+}
+function pan(x) {                                    // stereo position follows the firework
+  if (!ac.createStereoPanner) return bus;
+  const p = ac.createStereoPanner(); p.pan.value = clamp(x / COLS * 2 - 1, -1, 1); p.connect(bus); return p;
+}
+function whoosh(x) {                                 // rocket launch
+  if (!ac || !bus) return;
+  const T = ac.currentTime, s = noise(), f = ac.createBiquadFilter(), g = ac.createGain();
+  f.type = "bandpass"; f.Q.value = 2; f.frequency.setValueAtTime(400, T); f.frequency.exponentialRampToValueAtTime(2200, T + 0.7);
+  g.gain.setValueAtTime(0.0001, T); g.gain.linearRampToValueAtTime(0.14, T + 0.15); g.gain.linearRampToValueAtTime(0.0001, T + 0.75);
+  s.connect(f); f.connect(g); g.connect(pan(x)); s.start(T); s.stop(T + 0.8);
+}
+function boom(x, big) {                              // explosion: thump + blast + glitter crackle
+  if (!ac || !bus) return;
+  const T = ac.currentTime, out = pan(x), v = big ? 1.4 : 1;
+  const o = ac.createOscillator(), og = ac.createGain();
+  o.frequency.setValueAtTime(150, T); o.frequency.exponentialRampToValueAtTime(38, T + 0.5);
+  og.gain.setValueAtTime(0.5 * v, T); og.gain.exponentialRampToValueAtTime(0.001, T + 0.6);
+  o.connect(og); og.connect(out); o.start(T); o.stop(T + 0.65);
+  const s = noise(), lp = ac.createBiquadFilter(), ng = ac.createGain();
+  lp.type = "lowpass"; lp.frequency.setValueAtTime(3000, T); lp.frequency.exponentialRampToValueAtTime(300, T + 0.5);
+  ng.gain.setValueAtTime(0.4 * v, T); ng.gain.exponentialRampToValueAtTime(0.001, T + 0.55);
+  s.connect(lp); lp.connect(ng); ng.connect(out); s.start(T); s.stop(T + 0.6);
+  for (let i = 0; i < 14; i++) {
+    const t0 = T + 0.25 + Math.random() * 1.2, c = noise(), hp = ac.createBiquadFilter(), cg = ac.createGain();
+    hp.type = "highpass"; hp.frequency.value = 3500 + Math.random() * 3000;
+    cg.gain.setValueAtTime(0.09, t0); cg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.05);
+    c.connect(hp); hp.connect(cg); cg.connect(out); c.start(t0, Math.random()); c.stop(t0 + 0.06);
+  }
+}
+
+function restart() { t = 0; prevT = 0; scene.reset(); audio(); newBus(); }
+function setPlaying(p) { playing = p; $("bPlay").textContent = p ? "⏸" : "▶"; if (ac) p ? ac.resume() : ac.suspend(); }
+function start() { $("intro").classList.add("hide"); restart(); setPlaying(true); poke(); }
+function poke() {
+  $("bar").classList.remove("idle"); clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => playing && $("bar").classList.add("idle"), 2800);
+}
+function toggleFs() {
+  const el = document.documentElement;
+  if (!el.requestFullscreen) return;
+  document.fullscreenElement ? document.exitFullscreen() : el.requestFullscreen();
+}
+
+$("go").onclick = start;
+$("bPlay").onclick = () => setPlaying(!playing);
+$("bRe").onclick = () => { restart(); setPlaying(true); };
+$("bMute").onclick = () => { muted = !muted; $("bMute").textContent = muted ? "🔇" : "🔊"; if (master) master.gain.value = muted ? 0 : 1; };
+$("bFs").onclick = toggleFs;
+["mousemove", "pointerdown", "touchstart"].forEach(ev => addEventListener(ev, () => { if (playing) poke(); }, { passive: true }));
+addEventListener("keydown", e => {
+  if (e.code === "Space") { e.preventDefault(); $("intro").classList.contains("hide") ? setPlaying(!playing) : start(); }
+  if (e.key === "f" || e.key === "F") toggleFs();
+  if ((e.key === "r" || e.key === "R") && playing) $("bRe").click();
+  if (playing) poke();
+});
+
+function loop(now) {
+  const d = Math.min((now - last) / 1000, 0.1); last = now;
+  if (playing) acc += d;
+  if (acc >= 1 / FPS) {
+    const dt = acc; acc = 0; prevT = t; t += dt;
+    if (t > T_END) { restart(); t = dt; }
+    if (prevT < T_TEXT0 && t >= T_TEXT0) melody();
+    if (prevT < T_BURN0 && t >= T_BURN0) crackle();
+    draw(scene.frame(t, dt));
+    $("fill").style.width = (t / T_END * 100) + "%";
+    let c = STAGES[0][1]; for (const [ts, name] of STAGES) if (t >= ts) c = name;
+    if (c !== cap) { cap = c; $("cap").textContent = c; }
+  }
+  requestAnimationFrame(loop);
+}
+draw(scene.frame(7, 0));                  // pretty backdrop behind the intro screen
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
